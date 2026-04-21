@@ -1,0 +1,15 @@
+langchain<1
+langchain-anthropic
+langchain-chroma
+langchain-community
+langchain-huggingface
+langchain-text-splitters
+lxml
+beautifulsoup4
+einops
+fastapi
+uvicorn
+python-dotenv
+sentence-transformers
+tiktoken
+opentelemetry-exporter-otlp-proto-grpc>=1.41.0

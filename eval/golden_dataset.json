@@ -1,0 +1,29 @@
+[
+  {
+    "id": "react-performance",
+    "question": "What does the Bitovi blog say about React performance?",
+    "expected_topics": [
+      "measure performance before optimizing",
+      "rendering behavior",
+      "cite Bitovi source articles"
+    ]
+  },
+  {
+    "id": "frontend-testing",
+    "question": "How does Bitovi approach testing frontend applications?",
+    "expected_topics": [
+      "automated tests",
+      "frontend behavior",
+      "cite Bitovi source articles"
+    ]
+  },
+  {
+    "id": "ai-assisted-development",
+    "question": "What articles discuss AI-assisted software development?",
+    "expected_topics": [
+      "AI-assisted development",
+      "software delivery",
+      "cite Bitovi source articles"
+    ]
+  }
+]
