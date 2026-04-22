@@ -28,10 +28,6 @@ def test_answer_question_uses_agent_output_and_intermediate_step_sources(
                 "title": "React Performance",
                 "url": "https://www.bitovi.com/blog/react-performance",
             },
-            {
-                "title": "Frontend Testing",
-                "url": "https://www.bitovi.com/blog/frontend-testing",
-            },
         ],
     }
 
@@ -68,6 +64,65 @@ def test_answer_question_falls_back_to_retriever_when_agent_returns_no_documents
     }
 
 
+def test_answer_question_filters_fallback_sources_to_question_topic(monkeypatch) -> None:
+    ci_doc = Document(
+        page_content=(
+            "Continuous Integration automations simplify software delivery by "
+            "helping ensure deployed code is bug-free and secure."
+        ),
+        metadata={
+            "source": "https://www.bitovi.com/blog/devops-consulting-continuous-integration",
+            "title": "DevOps Consulting: Continuous Integration",
+        },
+    )
+    interview_doc = Document(
+        page_content=(
+            "Bitovi is a group of talented software engineers and product designers."
+        ),
+        metadata={
+            "source": "https://www.bitovi.com/blog/interview-with-a-devops-engineer",
+            "title": "Interview with a Bitovian: Meet Phil Henning, DevOps Engineer",
+        },
+    )
+    duplicate_ci_doc = Document(
+        page_content=(
+            "The core functions of Continuous Integration are build, test, and publish."
+        ),
+        metadata={
+            "source": "https://www.bitovi.com/blog/devops-consulting-continuous-integration",
+            "title": "DevOps Consulting: Continuous Integration",
+        },
+    )
+    ai_agents_doc = Document(
+        page_content="Temporal helps teams build production-grade AI agents.",
+        metadata={
+            "source": "https://www.bitovi.com/blog/production-ready-ai-agents-making-langchain-durable-using-temporal",
+            "title": "Production Ready AI Agents: Making LangChain Durable Using Temporal",
+        },
+    )
+    executor = FakeExecutor(
+        output="Continuous Integration helps teams build, test, and publish safely.",
+        intermediate_steps=[],
+    )
+    retriever = FakeRetriever(
+        [ci_doc, interview_doc, duplicate_ci_doc, interview_doc, ai_agents_doc]
+    )
+
+    monkeypatch.setattr(chain, "get_chain", lambda: executor)
+    monkeypatch.setattr(chain, "get_retriever", lambda: retriever)
+
+    result = chain.answer_question(
+        "What does the bitovi blog say about the benefits of continuous integration?"
+    )
+
+    assert result["sources"] == [
+        {
+            "title": "DevOps Consulting: Continuous Integration",
+            "url": "https://www.bitovi.com/blog/devops-consulting-continuous-integration",
+        }
+    ]
+
+
 def test_answer_question_lists_all_articles_by_topic_metadata(monkeypatch) -> None:
     devops_docs = [
         Document(
@@ -98,6 +153,19 @@ def test_answer_question_lists_all_articles_by_topic_metadata(monkeypatch) -> No
             "topics": "Project Management",
         },
     )
+    browser_challenge_doc = Document(
+        page_content=(
+            "Checking browser\n"
+            "Enable JavaScript and cookies to continue\n"
+            "REQUEST ID: 123\n"
+            "IP ADDRESS: 192.0.2.1"
+        ),
+        metadata={
+            "source": "https://www.bitovi.com/blog/devops-browser-check",
+            "title": "Checking browser",
+            "topics": "DevOps",
+        },
+    )
 
     def fail_chain() -> FakeExecutor:
         raise AssertionError("article list questions should not use the agent")
@@ -107,7 +175,12 @@ def test_answer_question_lists_all_articles_by_topic_metadata(monkeypatch) -> No
         chain,
         "get_document_store",
         lambda: FakeVectorStore(
-            [*devops_docs, duplicate_devops_chunk, incidental_devops_doc]
+            [
+                *devops_docs,
+                duplicate_devops_chunk,
+                incidental_devops_doc,
+                browser_challenge_doc,
+            ]
         ),
     )
 

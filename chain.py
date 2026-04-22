@@ -44,6 +44,45 @@ Thought:{agent_scratchpad}"""
 
 LATEST_POSTS_N = 5
 MAX_SOURCES = 5
+SOURCE_TOKEN_RE = re.compile(r"[a-z0-9]+")
+SOURCE_STOPWORDS = {
+    "a",
+    "about",
+    "all",
+    "an",
+    "and",
+    "article",
+    "articles",
+    "bitovi",
+    "blog",
+    "blogs",
+    "can",
+    "could",
+    "does",
+    "for",
+    "from",
+    "get",
+    "give",
+    "have",
+    "how",
+    "in",
+    "is",
+    "list",
+    "me",
+    "of",
+    "on",
+    "post",
+    "posts",
+    "say",
+    "show",
+    "tell",
+    "the",
+    "to",
+    "what",
+    "which",
+    "with",
+    "you",
+}
 ARTICLE_LIST_RE = re.compile(
     r"\b(show|list|give|find)\b.*\ball\b.*\b(blog\s+posts?|posts?|articles?)\b"
     r"|\b(which|what)\b.*\ball\b.*\b(blog\s+posts?|posts?|articles?)\b",
@@ -57,6 +96,12 @@ MONTH_DATE_RE = re.compile(
 )
 PUBLISH_DATE_KEYS = ("publish_date", "published", "date")
 DOCUMENT_CACHE_PATH = Path(".cache/bitovi_blog_documents.json")
+BROWSER_CHALLENGE_TITLES = {"checking browser"}
+BROWSER_CHALLENGE_MARKERS = (
+    "enable javascript and cookies to continue",
+    "request id:",
+    "ip address:",
+)
 
 
 def _dedupe_sources(documents: list[Document]) -> list[dict[str, str]]:
@@ -64,6 +109,8 @@ def _dedupe_sources(documents: list[Document]) -> list[dict[str, str]]:
     sources: list[dict[str, str]] = []
     seen: set[str] = set()
     for doc in documents:
+        if not _is_valid_article_document(doc):
+            continue
         url = doc.metadata.get("source") or doc.metadata.get("url")
         if not url or url in seen:
             continue
@@ -75,6 +122,61 @@ def _dedupe_sources(documents: list[Document]) -> list[dict[str, str]]:
             }
         )
     return sources
+
+
+def _is_valid_article_document(document: Document) -> bool:
+    """Return whether a document is real article content, not bot-check chrome."""
+    title = str(document.metadata.get("title") or "").strip().casefold()
+    if title in BROWSER_CHALLENGE_TITLES:
+        return False
+
+    content = document.page_content.strip().casefold()
+    return not all(marker in content for marker in BROWSER_CHALLENGE_MARKERS)
+
+
+def _source_query_terms(question: str) -> set[str]:
+    """Return meaningful query terms for filtering returned source citations."""
+    terms = {
+        token
+        for token in SOURCE_TOKEN_RE.findall(question.casefold())
+        if token not in SOURCE_STOPWORDS and (len(token) > 2 or token in {"ai", "ci"})
+    }
+    if "ci" in terms:
+        terms.update({"continuous", "integration"})
+    if "ai" in terms:
+        terms.update({"artificial", "intelligence"})
+    return terms
+
+
+def _source_document_terms(document: Document) -> set[str]:
+    """Return searchable terms from document content and citation metadata."""
+    metadata_text = " ".join(str(value) for value in document.metadata.values())
+    text = "\n".join(
+        [
+            str(document.metadata.get("title") or ""),
+            document.page_content,
+            metadata_text,
+        ]
+    )
+    return set(SOURCE_TOKEN_RE.findall(text.casefold()))
+
+
+def _filter_relevant_source_documents(
+    question: str,
+    documents: list[Document],
+) -> list[Document]:
+    """Drop retrieved source documents that do not match the question topic."""
+    query_terms = _source_query_terms(question)
+    if not query_terms:
+        return documents
+
+    minimum_matches = 1 if len(query_terms) == 1 else 2
+    relevant_documents = [
+        document
+        for document in documents
+        if len(query_terms & _source_document_terms(document)) >= minimum_matches
+    ]
+    return relevant_documents or documents
 
 
 def _is_article_list_question(question: str) -> bool:
@@ -162,6 +264,8 @@ def _unique_source_documents(documents: list[Document]) -> list[Document]:
     """Collapse chunk documents into one searchable document per source URL."""
     by_source: dict[str, tuple[int, dict[str, Any], list[str]]] = {}
     for order, doc in enumerate(documents):
+        if not _is_valid_article_document(doc):
+            continue
         source = doc.metadata.get("source") or doc.metadata.get("url")
         if not source:
             continue
@@ -537,6 +641,7 @@ def answer_question(question: str) -> dict[str, Any]:
         # Fallback to semantic search only if no sources found
         docs = get_retriever().invoke(question)
 
+    docs = _filter_relevant_source_documents(question, docs)
     return {
         "answer": result["output"],
         "sources": _dedupe_sources(docs)[:MAX_SOURCES],
