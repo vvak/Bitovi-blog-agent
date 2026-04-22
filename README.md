@@ -29,7 +29,7 @@ embeds those chunks, and stores them locally in `chroma_db/`.
 - LangChain for the ReAct agent, retrieval tool, and Anthropic integration
 - Anthropic `claude-haiku-4-5` for answer generation
 - Hugging Face `sentence-transformers/all-MiniLM-L6-v2` for embeddings
-- `huggingface-cli` for Hugging Face model authentication and downloads
+- Hugging Face CLI `hf` for Hugging Face model authentication and downloads
 - Chroma for the local vector store
 - Next.js, React, and TypeScript for the browser UI
 
@@ -83,7 +83,7 @@ uv sync --python 3.12
 Log in to Hugging Face before using the embedding model:
 
 ```bash
-uv run huggingface-cli login
+uv run hf auth login
 ```
 
 Install the frontend dependencies:
