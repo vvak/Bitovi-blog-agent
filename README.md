@@ -14,17 +14,30 @@ agent's answer with cited source articles.
 ## How It Works
 
 At runtime, the FastAPI backend receives a question and passes it to the
-LangChain agent. The agent has access to a `search_blog` retrieval tool backed
-by Chroma. For Bitovi-related questions, it can query the RAG layer, inspect the
-retrieved article chunks, reformulate the search once if results are weak, and
-then produce a concise answer with the source articles that informed it.
+LangChain agent. The agent has access to four tools to answer Bitovi-related
+questions: semantic search, recency lookup, topic counting, and topic listing.
+It can query the RAG layer, inspect retrieved article chunks, and produce
+concise answers with cited sources.
 
 `chain.py` owns this runtime RAG flow. It opens the persisted Chroma vector
-store, creates the similarity retriever, wraps that retriever as the
-`search_blog` tool, builds the ReAct agent, and exposes `answer_question()` as
-the backend entry point. After the agent runs, it extracts retrieved documents
-from the agent steps, falls back to a direct retriever query when needed, and
-deduplicates the returned source citations.
+store, creates the similarity retriever, builds the ReAct agent with four tools,
+and exposes `answer_question()` as the backend entry point. List-all article
+requests are answered directly from indexed metadata so every matching article
+can be returned. After the agent runs for other questions, it extracts retrieved
+documents from the agent steps, falls back to a direct retriever query when
+needed, and deduplicates the returned source citations.
+
+### Agent Tools
+
+The agent selects and uses the appropriate tool based on the question:
+
+- **search_blog**: Semantic search across the indexed Bitovi blog articles. Use for questions about specific topics, techniques, or content areas (e.g., "What does Bitovi recommend for React performance?"). Returns up to 5 relevant articles with snippets.
+
+- **get_latest_blog_posts**: Returns the 5 most recent Bitovi blog articles sorted by publication date. Automatically used for recency questions (e.g., "What's the latest blog post?", "What's new on the Bitovi blog?").
+
+- **count_articles**: Counts how many Bitovi blog articles are tagged with a specific topic. Used for coverage questions (e.g., "How many articles about AI?", "Does Bitovi write a lot about DevOps?"). Returns exact counts based on Bitovi's official topic pages. Supports topics: `ai`, `devops` (easily extensible by adding to `TOPIC_SLUGS` in `config.py`).
+
+- **list_articles**: Lists all Bitovi blog articles tagged with a specific topic. Used for list-all questions (e.g., "Can you show me all Bitovi articles about DevOps?"). Returns every matching article with source citations.
 
 The retrieval index used by the RAG layer is built ahead of time by `ingest.py`. Ingestion loads Bitovi blog pages, normalizes article text and metadata, splits the articles into chunks, embeds those chunks, and stores them locally in `chroma_db/`.
 
@@ -171,7 +184,7 @@ requests from `http://localhost:3000` and `http://127.0.0.1:3000`.
 
 ## Configuration
 
-Backend settings live in `config.py`:
+Backend settings live in `config.py` and `ingest.py`:
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -180,7 +193,8 @@ Backend settings live in `config.py`:
 | `BLOG_URL` | `https://www.bitovi.com/blog` | Recursive crawl fallback root |
 | `CHROMA_DIR` | `chroma_db` | Local Chroma persistence directory |
 | `COLLECTION_NAME` | `bitovi_blog` | Chroma collection name |
-| `RETRIEVER_K` | `3` | Number of chunks the agent retrieves per search |
+| `RETRIEVER_K` | `5` | Number of chunks the agent retrieves per search |
+| `TOPIC_SLUGS` (ingest.py) | `["ai", "devops"]` | Blog topic tags to scrape for the `count_articles` tool |
 
 Frontend API configuration:
 

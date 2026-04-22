@@ -47,6 +47,12 @@ class FakeVectorStore:
         self.as_retriever_calls.append(kwargs)
         return FakeRetriever(self.documents)
 
+    def get(self, **_: Any) -> dict[str, list[Any]]:
+        return {
+            "documents": [document.page_content for document in self.documents],
+            "metadatas": [document.metadata for document in self.documents],
+        }
+
 
 @dataclass
 class FakeExecutor:

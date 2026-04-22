@@ -95,3 +95,17 @@ def test_ingest_passes_refresh_cache_to_document_loader(monkeypatch) -> None:
 
     assert ingest.ingest(refresh_cache=True) == (1, 1)
     assert calls == [True]
+
+
+def test_parse_publish_timestamp_prefers_publish_date_over_lastmod() -> None:
+    meta = {"publish_date": "2023-11-15T00:00:00", "lastmod": "2019-01-01"}
+    assert ingest._parse_publish_timestamp(meta) == 1700006400
+
+
+def test_parse_publish_timestamp_falls_back_to_lastmod() -> None:
+    meta = {"publish_date": "", "lastmod": "2026-04-08"}
+    assert ingest._parse_publish_timestamp(meta) == 1775606400
+
+
+def test_parse_publish_timestamp_returns_zero_for_empty() -> None:
+    assert ingest._parse_publish_timestamp({"publish_date": "", "lastmod": ""}) == 0

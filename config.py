@@ -12,7 +12,7 @@ EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 BLOG_URL = "https://www.bitovi.com/blog"
 CHROMA_DIR = Path("chroma_db")
 COLLECTION_NAME = "bitovi_blog"
-RETRIEVER_K = 3
+RETRIEVER_K = 5
 
 def get_llm():
     from langchain_anthropic import ChatAnthropic

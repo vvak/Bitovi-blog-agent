@@ -69,3 +69,55 @@ def test_get_retriever_configures_similarity_search(monkeypatch, fake_vector_sto
             "search_kwargs": {"k": chain.RETRIEVER_K},
         }
     ]
+
+
+def test_get_latest_blog_posts_returns_sorted_unique_articles(monkeypatch) -> None:
+    class FakeCollection:
+        def get(self, include, where):
+            return {
+                "metadatas": [
+                    {
+                        "source": "https://bitovi.com/blog/old",
+                        "title": "Old Post",
+                        "publish_timestamp": 1000,
+                        "lastmod": "2001-01-01",
+                    },
+                    {
+                        "source": "https://bitovi.com/blog/new",
+                        "title": "New Post",
+                        "publish_timestamp": 9999,
+                        "lastmod": "2026-04-08",
+                    },
+                    {
+                        "source": "https://bitovi.com/blog/new",
+                        "title": "New Post",
+                        "publish_timestamp": 9999,
+                        "lastmod": "2026-04-08",
+                    },
+                ],
+                "documents": ["old content", "new content", "new content chunk 2"],
+            }
+
+    class FakeVS:
+        _collection = FakeCollection()
+
+    monkeypatch.setattr(chain, "get_vector_store", lambda: FakeVS())
+    result = chain._get_latest_blog_posts_impl("anything")
+
+    assert "New Post" in result
+    assert "Old Post" in result
+    assert result.index("New Post") < result.index("Old Post")
+    assert result.count("bitovi.com/blog/new") == 1
+
+
+def test_get_latest_blog_posts_handles_empty_collection(monkeypatch) -> None:
+    class FakeCollection:
+        def get(self, include, where):
+            return {"metadatas": [], "documents": []}
+
+    class FakeVS:
+        _collection = FakeCollection()
+
+    monkeypatch.setattr(chain, "get_vector_store", lambda: FakeVS())
+    result = chain._get_latest_blog_posts_impl("")
+    assert "No articles" in result

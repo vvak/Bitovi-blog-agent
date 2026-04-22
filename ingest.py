@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import urllib.request
 from pathlib import Path
 from typing import Iterable
 
@@ -20,6 +21,46 @@ from config import BLOG_URL, CHROMA_DIR, COLLECTION_NAME, get_embeddings
 
 ADD_BATCH_SIZE = 64
 DOCUMENT_CACHE_PATH = Path(".cache/bitovi_blog_documents.json")
+TOPIC_SLUGS = ["ai", "devops"]
+
+
+def _scrape_topic_urls(slug: str) -> set[str]:
+    """Return the set of article URLs tagged with a Bitovi blog topic."""
+    urls: set[str] = set()
+    page = 1
+    base = f"https://www.bitovi.com/blog/topic/{slug}"
+    while True:
+        url = base if page == 1 else f"{base}/page/{page}"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": os.environ.get("USER_AGENT", "bot")})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                html = resp.read().decode("utf-8", errors="replace")
+        except Exception:
+            break
+        soup = BeautifulSoup(html, "html.parser")
+        found = {
+            a["href"].rstrip("/")
+            for a in soup.find_all("a", href=True)
+            if re.match(r"https://(www\.)?bitovi\.com/blog/[^/]+$", a["href"])
+        }
+        if not found:
+            break
+        urls |= found
+        page += 1
+    return urls
+
+
+def _build_topic_map(slugs: list[str] = TOPIC_SLUGS) -> dict[str, list[str]]:
+    """Return {article_url: [topic_slug, ...]} for all configured topic pages."""
+    url_topics: dict[str, list[str]] = {}
+    for slug in slugs:
+        topic_urls = _scrape_topic_urls(slug)
+        for url in topic_urls:
+            # Normalize URLs to use www prefix to match document sources
+            normalized_url = url.replace("https://bitovi.com/", "https://www.bitovi.com/")
+            url_topics.setdefault(normalized_url, []).append(slug)
+        print(f"Scraped {len(topic_urls)} articles for topic '{slug}'")
+    return url_topics
 
 
 def _clean_lines(text: str) -> list[str]:
@@ -45,6 +86,20 @@ def _clean_lines(text: str) -> list[str]:
     return lines
 
 
+def _date_from_json_ld(soup: BeautifulSoup) -> str:
+    """Extract datePublished from JSON-LD BlogPosting structured data."""
+    import json
+
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+            if isinstance(data, dict) and data.get("@type") == "BlogPosting":
+                return data.get("datePublished", "")
+        except (json.JSONDecodeError, AttributeError):
+            continue
+    return ""
+
+
 def _metadata_from_content(content: str, fallback_url: str) -> dict[str, str]:
     """Extract source, title, and publish date metadata from a crawled page."""
     soup = BeautifulSoup(content, "html.parser")
@@ -67,8 +122,8 @@ def _metadata_from_content(content: str, fallback_url: str) -> dict[str, str]:
     if not title and lines:
         title = lines[0]
 
-    publish_date = ""
-    if date_tag:
+    publish_date = _date_from_json_ld(soup)
+    if not publish_date and date_tag:
         publish_date = (
             date_tag.get("datetime")
             or date_tag.get("content")
@@ -89,7 +144,7 @@ def _extract_article_text(content: str, title: str) -> str:
     if article:
         lines = _clean_lines(article.get_text("\n", strip=True))
     else:
-        lines = _clean_lines(content)
+        lines = _clean_lines(soup.get_text("\n", strip=True))
 
     start_index = 0
     if "Share:" in lines:
@@ -107,8 +162,31 @@ def _extract_article_text(content: str, title: str) -> str:
     return "\n".join(article_lines).strip()
 
 
-def _normalize_metadata(documents: Iterable[Document]) -> list[Document]:
+def _parse_publish_timestamp(metadata: dict[str, str]) -> int:
+    """Return a UTC Unix timestamp int from publish_date or lastmod, or 0."""
+    from datetime import datetime, timezone
+
+    for field, fmt in [
+        ("publish_date", "%Y-%m-%d %H:%M:%S"),
+        ("publish_date", "%Y-%m-%dT%H:%M:%S"),
+        ("publish_date", "%Y-%m-%d"),
+        ("lastmod", "%Y-%m-%d"),
+    ]:
+        raw = metadata.get(field, "").strip()
+        if not raw:
+            continue
+        try:
+            dt = datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+        except ValueError:
+            continue
+    return 0
+
+
+def _normalize_metadata(documents: Iterable[Document], topic_map: dict[str, list[str]] | None = None) -> list[Document]:
     """Convert raw loader documents into article-only documents with stable metadata."""
+    if topic_map is None:
+        topic_map = {}
     normalized = []
     for doc in documents:
         source = doc.metadata.get("source") or doc.metadata.get("loc") or BLOG_URL
@@ -117,6 +195,10 @@ def _normalize_metadata(documents: Iterable[Document]) -> list[Document]:
         metadata["source"] = source
         metadata["title"] = metadata.get("title") or source
         metadata["publish_date"] = metadata.get("publish_date") or ""
+        metadata["publish_timestamp"] = _parse_publish_timestamp(metadata)
+        # Add topic tags based on whether this article appears in any topic page
+        source_normalized = source.rstrip("/")
+        metadata["topics"] = ",".join(topic_map.get(source_normalized, []))
         page_content = _extract_article_text(doc.page_content, metadata["title"])
         if page_content:
             normalized.append(Document(page_content=page_content, metadata=metadata))
@@ -140,6 +222,7 @@ def _load_with_sitemap() -> list[Document]:
     loader = SitemapLoader(
         web_path=sitemap_url,
         filter_urls=[r"https://www\.bitovi\.com/blog/.+"],
+        parsing_function=lambda soup: str(soup),  # preserve raw HTML so JSON-LD is available for date extraction
     )
     return loader.load()
 
@@ -262,7 +345,13 @@ def ingest(reset: bool = False, refresh_cache: bool = False) -> tuple[int, int]:
     documents = load_blog_documents(refresh_cache=refresh_cache)
     if not documents:
         raise RuntimeError(f"No documents loaded from {BLOG_URL}")
-    #Set chunk size to 500 and overlap to 100 if using embeddinggemma-300m 
+
+    topic_map = _build_topic_map()
+    for doc in documents:
+        src = doc.metadata.get("source", "").rstrip("/")
+        doc.metadata["topics"] = ",".join(topic_map.get(src, []))
+
+    #Set chunk size to 500 and overlap to 100 if using embeddinggemma-300m
     splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
         chunk_size=256,
         chunk_overlap=30,
