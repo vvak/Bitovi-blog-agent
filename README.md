@@ -19,9 +19,14 @@ by Chroma. For Bitovi-related questions, it can query the RAG layer, inspect the
 retrieved article chunks, reformulate the search once if results are weak, and
 then produce a concise answer with the source articles that informed it.
 
-The RAG layer is built ahead of time by `ingest.py`. Ingestion loads Bitovi blog
-pages, normalizes article text and metadata, splits the articles into chunks,
-embeds those chunks, and stores them locally in `chroma_db/`.
+`chain.py` owns this runtime RAG flow. It opens the persisted Chroma vector
+store, creates the similarity retriever, wraps that retriever as the
+`search_blog` tool, builds the ReAct agent, and exposes `answer_question()` as
+the backend entry point. After the agent runs, it extracts retrieved documents
+from the agent steps, falls back to a direct retriever query when needed, and
+deduplicates the returned source citations.
+
+The retrieval index used by the RAG layer is built ahead of time by `ingest.py`. Ingestion loads Bitovi blog pages, normalizes article text and metadata, splits the articles into chunks, embeds those chunks, and stores them locally in `chroma_db/`.
 
 ## What It Uses
 

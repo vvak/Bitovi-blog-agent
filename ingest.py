@@ -262,10 +262,10 @@ def ingest(reset: bool = False, refresh_cache: bool = False) -> tuple[int, int]:
     documents = load_blog_documents(refresh_cache=refresh_cache)
     if not documents:
         raise RuntimeError(f"No documents loaded from {BLOG_URL}")
-
+    #Set chunk size to 500 and overlap to 100 if using embeddinggemma-300m 
     splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-        chunk_size=512,
-        chunk_overlap=100,
+        chunk_size=256,
+        chunk_overlap=30,
     )
     chunks = splitter.split_documents(documents)
     chunks = [chunk for chunk in chunks if chunk.page_content.strip()]

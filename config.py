@@ -6,6 +6,8 @@ load_dotenv()
 
 LLM_MODEL = "claude-haiku-4-5"
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+#Use below model for higher quality responses at the expense of a longer embedding run (15min vs 30sec)
+#EMBED_MODEL = "google/embeddinggemma-300m"
 
 BLOG_URL = "https://www.bitovi.com/blog"
 CHROMA_DIR = Path("chroma_db")
