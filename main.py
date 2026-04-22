@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,14 +13,15 @@ from chain import answer_question
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Bitovi Blog RAG")
 
-
-@app.on_event("startup")
-def warm_embeddings() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Initialize the embedding model during API startup."""
     get_embeddings()
+    yield
 
+
+app = FastAPI(title="Bitovi Blog RAG", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
