@@ -132,7 +132,7 @@ During ingestion, the RAG layer:
 
 1. loads matching blog pages,
 2. extracts article text and metadata,
-3. splits article text into 500-token chunks with 50-token overlap,
+3. splits article text into 256-token chunks with 30-token overlap,
 4. embeds chunks in batches of 64,
 5. persists the Chroma collection to `./chroma_db`.
 
